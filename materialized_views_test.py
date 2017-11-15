@@ -3,6 +3,8 @@ import re
 import sys
 import time
 import traceback
+import random
+import string
 from functools import partial
 from multiprocessing import Process, Queue
 from unittest import skip, skipIf
@@ -21,7 +23,7 @@ from distutils.version import LooseVersion
 from dtest import Tester, debug, get_ip_from_node, create_ks
 from tools.assertions import (assert_all, assert_crc_check_chance_equal,
                               assert_invalid, assert_none, assert_one,
-                              assert_unavailable)
+                              assert_unavailable, assert_read_timeout_or_failure, assert_exception)
 from tools.data import rows_to_list
 from tools.decorators import since
 from tools.misc import new_node
@@ -46,12 +48,12 @@ class TestMaterializedViews(Tester):
         new_list = [list(row) for row in rows]
         return new_list
 
-    def prepare(self, user_table=False, rf=1, options=None, nodes=3, install_byteman=False, **kwargs):
+    def prepare(self, user_table=False, rf=1, options=None, nodes=3, install_byteman=False, tokens=None, jvm_args=None, **kwargs):
         cluster = self.cluster
-        cluster.populate([nodes, 0], install_byteman=install_byteman)
+        cluster.populate([nodes, 0], tokens=tokens, install_byteman=install_byteman)
         if options:
             cluster.set_configuration_options(values=options)
-        cluster.start()
+        cluster.start(jvm_args=jvm_args)
         node1 = cluster.nodelist()[0]
 
         session = self.patient_cql_connection(node1, **kwargs)
@@ -2135,6 +2137,57 @@ class TestMaterializedViews(Tester):
             self.assertTrue(base_entry, "Both base {} and view entry {} should exist.".format(base_entry, view_entry))
             self.assertTrue(view_entry, "Both base {} and view entry {} should exist.".format(base_entry, view_entry))
 
+    @since('4.0')
+    def test_partition_deletion(self):
+        """
+        notes so far: on trunk if you don't change partition key base replica will always be paired replica
+        """
+
+        session = self.prepare(rf=1, nodes=2,
+            jvm_args=["-Dcassandra.batchlog.replay_timeout_in_ms=60000"],
+            options={'write_request_timeout_in_ms': 1000000,
+            'max_value_size_in_mb': 1
+        })
+
+        keyspace = "partitiondeletions"
+
+        session.execute("""
+                CREATE KEYSPACE IF NOT EXISTS {}
+                WITH replication = {{ 'class': 'SimpleStrategy', 'replication_factor': '1' }}
+                """.format(keyspace))
+        session.cluster.control_connection.wait_for_schema_agreement()
+        session.set_keyspace(keyspace)
+
+        session.execute(
+            "CREATE TABLE IF NOT EXISTS test (pk int, ck int, data1 text, data2 text, PRIMARY KEY (pk, ck))")
+        session.execute("""CREATE MATERIALIZED VIEW test_partition_deletion AS
+        SELECT *
+        FROM test
+        WHERE pk IS NOT NULL AND data1 IS NOT NULL AND ck IS NOT NULL
+        PRIMARY KEY ((pk, data1), ck)
+        """)
+        records = 140000
+        params = []
+        for x in xrange(records):
+            letter = random.choice(string.ascii_lowercase)
+            params.append([x, letter])
+
+        execute_concurrent_with_args(
+            session,
+            session.prepare("INSERT INTO test (pk, ck, data1, data2) VALUES (0, ?, 'a', ?)"),
+            params
+        )
+
+        session.execute("TRUNCATE system.batchlog_v3");
+
+        #assert_one(session, "SELECT count(*) FROM test WHERE pk = 0", [records])
+
+        try:
+            session.execute("DELETE FROM test WHERE pk=0")
+        except:
+            pass
+
+        session.execute("SELECT * FROM system.batchlog_v3")
 
 # For read verification
 class MutationPresence(Enum):
@@ -2500,3 +2553,4 @@ class TestMaterializedViewsLockcontention(Tester):
                     make_mbean('metrics', type="ThreadPools", path='request', scope='MutationStage', name='PendingTasks'), "Value"
                 )
                 assert_equal(0, mutationStagePending, "Pending mutations: {}".format(mutationStagePending))
+
