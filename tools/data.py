@@ -21,7 +21,10 @@ def insert_c1c2(session, keys=None, n=None, consistency=ConsistencyLevel.QUORUM)
         raise ValueError("Expected exactly one of 'keys' or 'n' arguments to not be None; "
                          "got keys={keys}, n={n}".format(keys=keys, n=n))
     if n:
-        keys = list(range(n))
+        if isinstance(n, tuple):
+            keys = range(*n)
+        else:
+            keys = range(n)
 
     statement = session.prepare("INSERT INTO cf (key, c1, c2) VALUES (?, 'value1', 'value2')")
     statement.consistency_level = consistency
@@ -30,22 +33,29 @@ def insert_c1c2(session, keys=None, n=None, consistency=ConsistencyLevel.QUORUM)
 
 
 def query_c1c2(session, key, consistency=ConsistencyLevel.QUORUM, tolerate_missing=False, must_be_missing=False):
+    """
+    Query c1c2 for specific key.
+    :param key: key to query for
+    :param consistency: CL to query at
+    :param tolerate_missing: Accept no results
+    :param must_be_missing: Fail if it's not missing
+    :param expected_c1: Expected value for c1
+    :param expected_c2: Expected value for c2
+    """
     query = SimpleStatement('SELECT c1, c2 FROM cf WHERE key=\'k%d\'' % key, consistency_level=consistency)
     rows = list(session.execute(query))
-    if not tolerate_missing:
+    if not tolerate_missing and not must_be_missing: # we always tolerate missing if they must be missing
         assertions.assert_length_equal(rows, 1)
         res = rows[0]
         assert len(res) == 2 and res[0] == 'value1' and res[1] == 'value2', res
     if must_be_missing:
         assertions.assert_length_equal(rows, 0)
 
-
 def insert_columns(tester, session, key, columns_count, consistency=ConsistencyLevel.QUORUM, offset=0):
     upds = ["UPDATE cf SET v=\'value%d\' WHERE key=\'k%s\' AND c=\'c%06d\'" % (i, key, i) for i in range(offset * columns_count, columns_count * (offset + 1))]
     query = 'BEGIN BATCH %s; APPLY BATCH' % '; '.join(upds)
     simple_query = SimpleStatement(query, consistency_level=consistency)
     session.execute(simple_query)
-
 
 def query_columns(tester, session, key, columns_count, consistency=ConsistencyLevel.QUORUM, offset=0):
     query = SimpleStatement('SELECT c, v FROM cf WHERE key=\'k%s\' AND c >= \'c%06d\' AND c <= \'c%06d\'' % (key, offset, columns_count + offset - 1), consistency_level=consistency)
