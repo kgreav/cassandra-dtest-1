@@ -6,7 +6,7 @@ import logging
 from cassandra import ConsistencyLevel
 
 from dtest import Tester, create_ks
-from tools.data import create_c1c2_table, insert_c1c2, query_c1c2
+from tools.data import create_c1c2_table, insert_c1c2, query_c1c2, update_with_condition
 
 since = pytest.mark.since
 logger = logging.getLogger(__name__)
@@ -198,3 +198,53 @@ class TestHintedHandoff(Tester):
         time.sleep(5)
         for x in range(0, 100):
             query_c1c2(session, x, ConsistencyLevel.ONE)
+
+    @since('3.0')
+    def test_hintedhandoff_cas(self):
+        """
+        Test that we only store hinted handoff for CAS within the hint window
+        @jira CASSANDRA-14215
+        """
+        self.cluster.set_configuration_options({'max_hint_window_in_ms': 5000,
+                                                'hinted_handoff_enabled': True,
+                                                'max_hints_delivery_threads': 1,
+                                                'hints_flush_period_in_ms': 100})
+        self.cluster.populate(3)
+        node1, node2, node3 = self.cluster.nodelist()
+        self.cluster.start(wait_for_binary_proto=True)
+        session = self.patient_cql_connection(node1)
+        create_ks(session, 'ks', 3)
+        create_c1c2_table(self, session)
+
+        # Stop handoff until very end and take node2 down for first round of hints
+        node1.nodetool('pausehandoff')
+        node3.nodetool('pausehandoff')
+        # Stop node2
+        node2.nodetool('disablebinary')
+        node2.nodetool('disablegossip')
+        # Insert/update using LWT
+        insert_c1c2(session, keys=(1, 2), consistency=ConsistencyLevel.ONE)
+
+        update_with_condition(session, 1, 2, 1, consistency=ConsistencyLevel.ONE)
+        query_c1c2(session, 1, expected_c1=2, tolerate_missing=True, consistency=ConsistencyLevel.ONE)
+        # Wait for HH window to pass
+        time.sleep(5)
+        # Update key 2 to have c1=3
+        update_with_condition(session, 2, 3, 1, consistency=ConsistencyLevel.ONE)
+
+        node1.nodetool('resumehandoff')
+        node3.nodetool('resumehandoff')
+        node2.nodetool('enablegossip')
+        node2.nodetool('enablebinary')
+        # Wait for hints to replay
+        node1.watch_log_for('Finished hinted handoff')
+        node3.watch_log_for('Finished hinted handoff')
+        # Stop other nodes to ensure we only query node2
+        node3.stop()
+        node1.stop()
+        # Assert updates are present
+        session = self.patient_cql_connection(node2)
+        session.execute('USE ks')
+        query_c1c2(session, 1, expected_c1=2, tolerate_missing=True, consistency=ConsistencyLevel.ONE)
+        query_c1c2(session, 2, expected_c1=1, tolerate_missing=True, consistency=ConsistencyLevel.ONE)
+
