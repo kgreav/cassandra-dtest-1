@@ -1,9 +1,11 @@
+from ccmlib import node
 from dtest import Tester
 from time import sleep
 
 import pytest
 
 since = pytest.mark.since
+
 
 class TestGossiper(Tester):
     """
@@ -28,11 +30,19 @@ class TestGossiper(Tester):
                                }]
             })
 
-        node1.start(wait_other_notice=False)
-        self.assert_log_had_msg(node1, "Unable to gossip with any peers", timeout=120)
+        try:
+            STARTUP_TIMEOUT = 15  # seconds
+            RING_DELAY = 10000  # ms
+            # set startup timeout > ring delay so that startup failure happens before the call to start returns
+            node1.start(wait_for_binary_proto=STARTUP_TIMEOUT, jvm_args=['-Dcassandra.ring_delay_ms={}'.format(RING_DELAY)])
+        except node.TimeoutError:
+            self.assert_log_had_msg(node1, "Unable to gossip with any peers")
+        except Exception as e:
+            raise e
+        else:
+            pytest.fail("Expecting startup to raise a TimeoutError, but nothing was raised.")
 
     @since('3.11.2')
-    @pytest.mark.resource_intensive
     def test_startup_non_seed_with_peers(self):
         """
         Test that a node can start if peers are alive, or if a node has been bootstrapped
@@ -41,6 +51,7 @@ class TestGossiper(Tester):
         """
 
         self.fixture_dtest_setup.allow_log_errors = True
+
         n1 = self.cluster.create_node('node1', True, None, ('127.0.0.1', 7000), '7100',
                                       None, None, binary_interface=('127.0.0.1', 9042))
         n2 = self.cluster.create_node('node2', True, None, ('127.0.0.2', 7000), '7101',
@@ -64,7 +75,7 @@ class TestGossiper(Tester):
 
         # test non seed node can start when peer is started but seed isn't
         node3.start(wait_other_notice=False, wait_for_binary_proto=120)
-        self.assert_log_had_msg(node3, "Received an ack from /{}, who isn't a seed. Ensure your seed list includes a live node. Exiting shadow round".format(node2.address()), timeout=60)
+        self.assert_log_had_msg(node3, "Received an ack from {}, who isn't a seed. Ensure your seed list includes a live node. Exiting shadow round".format(node2.address_for_current_version_slashy()), timeout=60)
         node2.stop(wait=False)
         node3.stop(wait=True)
 
@@ -80,12 +91,12 @@ class TestGossiper(Tester):
         shadow round will still allow that node to join the ring.
         @jira_ticket CASSANDRA-13851
         """
-        RING_DELAY=15000 #ms
+        RING_DELAY = 15000  # ms
         self.fixture_dtest_setup.allow_log_errors = True
         n1 = self.cluster.create_node('node1', True, None, ('127.0.0.1', 7000), '7100',
-                                    None, None, binary_interface=('127.0.0.1', 9042))
+                                      None, None, binary_interface=('127.0.0.1', 9042))
         n2 = self.cluster.create_node('node2', True, None, ('127.0.0.2', 7000), '7101',
-                                    None, None, binary_interface=('127.0.0.2', 9042))
+                                      None, None, binary_interface=('127.0.0.2', 9042))
         self.cluster.add(n1, True)
         self.cluster.add(n2, False)
         node1, node2 = self.cluster.nodelist()
