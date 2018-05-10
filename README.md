@@ -98,6 +98,40 @@ To run the upgrade tests, you have must both JDK7 and JDK8 installed. Paths
 to these installations should be defined in the environment variables
 JAVA7_HOME and JAVA8_HOME, respectively.
 
+
+### Test filters
+There are a few ways to filter certain tests in/out based on mark annotations on the tests.
+
+Run all resource-intensive and default test suite.
+
+    pytest --force-resource-intensive-tests
+
+Run only resource intensive test suite.
+
+    pytest --resource-intensive-tests-only
+
+Skip resource-intensive tests (default)
+
+    pytest --skip-resource-intensive-tests
+
+*NOTE: upgrade tests are currently not working, but these commands should at least select the correct tests*
+
+Run all upgrade tests as well as default test suite
+
+    pytest --execute-upgrade-tests
+
+Run only upgrade tests
+
+    pytest --upgrade-tests-only
+
+Filters can be combined. For example, to run all tests which are `upgrade_test` AND `resource_intensive`:
+
+    pytest --force-resource-intensive-tests --upgrade-tests-only
+
+or to run ONLY `resource_intensive` upgrade tests:
+
+    pytest --upgrade-tests-only --resource-intensive-tests-only
+
 Installation Instructions
 -------------------------
 

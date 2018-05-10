@@ -32,7 +32,6 @@ import sys
 import os
 import re
 import logging
-
 from os import getcwd
 from tempfile import NamedTemporaryFile
 from bs4 import BeautifulSoup
@@ -44,7 +43,7 @@ from conftest import pytest_addoption
 from ccmlib.common import get_version_from_build
 
 logger = logging.getLogger(__name__)
-
+logger.addHandler(logging.StreamHandler(sys.stdout))
 
 class RunDTests():
     def run(self, argv):
@@ -108,52 +107,34 @@ class RunDTests():
         # we want to run, then generate a config object for each of them.
         logger.debug('Generating configurations from the following matrix:\n\t{}'.format(args))
 
-        args_to_invoke_pytest = []
+        args_to_invoke_pytest = ['pytest']
         if args.pytest_options:
             for arg in args.pytest_options.split(" "):
-                args_to_invoke_pytest.append("'{the_arg}'".format(the_arg=arg))
+                args_to_invoke_pytest.append("{the_arg}".format(the_arg=arg))
 
         for arg in argv:
-            if arg.startswith("--pytest-options") or arg.startswith("--dtest-"):
+            if arg.startswith("--pytest-options") or arg.startswith("--dtest-") or not arg.startswith("--"):
                 continue
-            args_to_invoke_pytest.append("'{the_arg}'".format(the_arg=arg))
+            args_to_invoke_pytest.append("{the_arg}".format(the_arg=arg))
 
         if args.dtest_print_tests_only:
-            args_to_invoke_pytest.append("'--collect-only'")
+            args_to_invoke_pytest.append("--collect-only")
 
         if args.dtest_tests:
             for test in args.dtest_tests.split(","):
-                args_to_invoke_pytest.append("'{test_name}'".format(test_name=test))
-
+                args_to_invoke_pytest.append("{test_name}".format(test_name=test))
         original_raw_cmd_args = ", ".join(args_to_invoke_pytest)
 
         logger.debug("args to call with: [%s]" % original_raw_cmd_args)
-
-        # the original run_dtests.py script did it like this to hack around nosetest
-        # limitations -- i'm not sure if they still apply or not in a pytest world
-        # but for now just leaving it as is, because it does the job (although
-        # certainly is still pretty complicated code and has a hacky feeling)
-        to_execute = (
-                "import pytest\n" +
-                (
-                "pytest.main([{options}])\n").format(options=original_raw_cmd_args)
-        )
-        temp = NamedTemporaryFile(dir=getcwd())
-        logger.debug('Writing the following to {}:'.format(temp.name))
-
-        logger.debug('```\n{to_execute}```\n'.format(to_execute=to_execute))
-        temp.write(to_execute.encode("utf-8"))
-        temp.flush()
 
         # We pass nose_argv as options to the python call to maintain
         # compatibility with the nosetests command. Arguments passed in via the
         # command line are treated one way, args passed in as
         # nose.main(argv=...) are treated another. Compare with the options
         # -xsv for an example.
-        cmd_list = [sys.executable, temp.name]
-        logger.debug('subprocess.call-ing {cmd_list}'.format(cmd_list=cmd_list))
+        logger.debug('subprocess.call-ing {cmd_list}'.format(cmd_list=args_to_invoke_pytest))
 
-        sp = subprocess.Popen(cmd_list, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ.copy())
+        sp = subprocess.Popen(args_to_invoke_pytest, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ.copy())
 
         if args.dtest_print_tests_only:
             stdout, stderr = sp.communicate()
@@ -166,7 +147,7 @@ class RunDTests():
             all_collected_test_modules = collect_test_modules(stdout)
             joined_test_modules = "\n".join(all_collected_test_modules)
             #print("Collected %d Test Modules" % len(all_collected_test_modules))
-            if args.dtest_print_tests_output is not None:
+            if args.dtest_print_tests_output:
                 collected_tests_output_file = open(args.dtest_print_tests_output, "w")
                 collected_tests_output_file.write(joined_test_modules)
                 collected_tests_output_file.close()
@@ -270,9 +251,8 @@ def collect_test_modules(stdout):
     all_collected_test_modules = []
 
     # parse the now valid xml
-    print("\n".join(test_collect_xml_lines))
+    logger.debug("\n".join(test_collect_xml_lines))
     test_collect_xml = BeautifulSoup("\n".join(test_collect_xml_lines), "lxml-xml")
-
     # find all Modules (followed by classes in those modules, and then finally functions)
     for pytest_module in test_collect_xml.findAll("Module"):
         for test_class_name in pytest_module.findAll("Class"):

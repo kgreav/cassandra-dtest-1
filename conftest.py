@@ -26,6 +26,7 @@ from dtest_setup_overrides import DTestSetupOverrides
 
 logger = logging.getLogger(__name__)
 
+
 def check_required_loopback_interfaces_available():
     """
     We need at least 3 loopback interfaces configured to run almost all dtests. On Linux, loopback
@@ -52,6 +53,8 @@ def pytest_addoption(parser):
                      help="Control the number of data directories to create per instance")
     parser.addoption("--force-resource-intensive-tests", action="store_true", default=False,
                      help="Forces the execution of tests marked as resource_intensive")
+    parser.addoption("--resource-intensive-tests-only", action="store_true", default=False,
+                     help="Executes only tests marked as resource_intensive")
     parser.addoption("--skip-resource-intensive-tests", action="store_true", default=False,
                      help="Skip all tests marked as resource_intensive")
     parser.addoption("--cassandra-dir", action="store", default=None,
@@ -66,6 +69,8 @@ def pytest_addoption(parser):
                      help="Delete all generated logs created by a test after the completion of a test.")
     parser.addoption("--execute-upgrade-tests", action="store_true", default=False,
                      help="Execute Cassandra Upgrade Tests (e.g. tests annotated with the upgrade_test mark)")
+    parser.addoption("--upgrade-tests-only", action="store_true", default=False,
+                     help="Execute ONLY Upgrade Tests (e.g. tests annotated with the upgrade_test mark)")
     parser.addoption("--disable-active-log-watching", action="store_true", default=False,
                      help="Disable ccm active log watching, which will cause dtests to check for errors in the "
                           "logs in a single operation instead of semi-realtime processing by consuming "
@@ -456,18 +461,28 @@ def pytest_collection_modifyitems(items, config):
                 logger.info("SKIP: Deselecting test %s as the test requires vnodes to be enabled. To run this test, "
                             "re-run with the --use-vnodes command line argument" % item.name)
 
+        if config.getoption("--resource-intensive-tests-only") and not item.get_marker("resource_intensive"):
+            deselect_test = True
+            logger.info("SKIP: Deselecting test {0} as it is not marked resource_intensive", item.name)
+
         for test_item_class in inspect.getmembers(item.module, inspect.isclass):
             if not hasattr(test_item_class[1], "pytestmark"):
+                # no "marks" in the class, deselect if we're doing upgrade tests only
+                if config.getoption("--upgrade-tests-only"):
+                    deselect_test = True
                 continue
 
             for module_pytest_mark in test_item_class[1].pytestmark:
                 if module_pytest_mark.name == "upgrade_test":
-                    if not config.getoption("--execute-upgrade-tests"):
+                    # Deselect upgrade tests if we haven't specified them
+                    if not config.getoption("--execute-upgrade-tests") and not config.getoption("--upgrade-tests-only"):
                         deselect_test = True
 
         if item.get_marker("upgrade_test"):
             if not config.getoption("--execute-upgrade-tests"):
                 deselect_test = True
+        elif config.getoption("--upgrade-tests-only"):
+            deselect_test = True
 
         # todo kjkj: deal with no_offheap_memtables mark
 
