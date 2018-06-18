@@ -11,6 +11,7 @@ import signal
 from cassandra import ConsistencyLevel
 from cassandra.concurrent import execute_concurrent_with_args
 from ccmlib.node import NodeError
+from ccmlib.node import TimeoutError
 
 import pytest
 
@@ -26,6 +27,8 @@ since = pytest.mark.since
 logger = logging.getLogger(__name__)
 
 class TestBootstrap(Tester):
+    byteman_submit_path_pre_4_0 = './byteman/pre4.0/stream_failure.btm'
+    byteman_submit_path_4_0 = './byteman/4.0/stream_failure.btm'
 
     @pytest.fixture(autouse=True)
     def fixture_add_additional_log_patterns(self, fixture_dtest_setup):
@@ -305,26 +308,22 @@ class TestBootstrap(Tester):
         cluster.start(wait_other_notice=True)
         # kill stream to node3 in the middle of streaming to let it fail
         if cluster.version() < '4.0':
-            node1.byteman_submit(['./byteman/pre4.0/stream_failure.btm'])
+            node1.byteman_submit([self.byteman_submit_path_pre_4_0])
         else:
-            node1.byteman_submit(['./byteman/4.0/stream_failure.btm'])
+            node1.byteman_submit([self.byteman_submit_path_4_0])
         node1.stress(['write', 'n=1K', 'no-warmup', 'cl=TWO', '-schema', 'replication(factor=2)', '-rate', 'threads=50'])
         cluster.flush()
 
         # start bootstrapping node3 and wait for streaming
         node3 = new_node(cluster)
-        node3.start(wait_other_notice=False, wait_for_binary_proto=True)
+        node3.start(wait_other_notice=False)
 
-        # wait for node3 ready to query
-        node3.watch_log_for("Starting listening for CQL clients")
-        mark = node3.mark_log()
-        # check if node3 is still in bootstrap mode
-        retry_till_success(assert_bootstrap_state, tester=self, node=node3, expected_bootstrap_state='IN_PROGRESS', timeout=120)
+        # let streaming fail as we expect
+        node3.watch_log_for('Some data streaming failed')
 
-        # bring back node1 and invoke nodetool bootstrap to resume bootstrapping
+        # bring back node3 and invoke nodetool bootstrap to resume bootstrapping
         node3.nodetool('bootstrap resume')
-
-        node3.watch_log_for("Resume complete", from_mark=mark)
+        node3.wait_for_binary_interface()
         assert_bootstrap_state(self, node3, 'COMPLETED')
 
         # cleanup to guarantee each node will only have sstables of its ranges
@@ -703,3 +702,41 @@ class TestBootstrap(Tester):
             logger.debug("Deleting {}".format(data_dir))
             shutil.rmtree(data_dir)
         shutil.rmtree(commitlog_dir)
+
+    @since('2.2')
+    def test_bootstrap_binary_disabled(self):
+        """
+        Test binary while bootstraping
+        """
+        cluster = self.cluster
+        cluster.populate(2)
+
+        node1 = cluster.nodes['node1']
+        # set up byteman
+        node1.byteman_port = '8100'
+        node1.import_config_files()
+
+        cluster.start(wait_other_notice=True)
+        # kill stream to node3 in the middle of streaming to let it fail
+        if cluster.version() < '4.0':
+            node1.byteman_submit([self.byteman_submit_path_pre_4_0])
+        else:
+            node1.byteman_submit([self.byteman_submit_path_4_0])
+        node1.stress(['write', 'n=1K', 'no-warmup', 'cl=TWO', '-schema', 'replication(factor=2)', '-rate', 'threads=50'])
+        cluster.flush()
+
+        # start bootstrapping node3 and wait for streaming
+        node3 = new_node(cluster)
+        node3.start(wait_other_notice=True)
+        binary_enabled = False
+        try:
+            node3.wait_for_binary_interface(timeout=60)
+            binary_enabled = True
+        except TimeoutError:
+            pass
+        assert binary_enabled == False
+
+        node3.watch_log_for('Some data streaming failed')
+        node3.nodetool('bootstrap resume')
+        node3.wait_for_binary_interface()
+        assert_bootstrap_state(self, node3, 'COMPLETED')
