@@ -410,6 +410,7 @@ def pytest_collection_modifyitems(items, config):
     This function is called upon during the pytest test collection phase and allows for modification
     of the test items within the list
     """
+
     if not config.getoption("--collect-only") and config.getoption("--cassandra-dir") is None:
         if config.getoption("--cassandra-version") is None:
             raise Exception("Required dtest arguments were missing! You must provide either --cassandra-dir "
@@ -429,7 +430,8 @@ def pytest_collection_modifyitems(items, config):
     deselected_items = []
 
     sufficient_system_resources_resource_intensive = sufficient_system_resources_for_resource_intensive_tests()
-    logger.debug("has sufficient resources? %s" % sufficient_system_resources_resource_intensive)
+    if sufficient_system_resources_resource_intensive:
+        logger.warn('Not enough memory to reliably run "resource_intensive" tests, you will likely encounter many failures! Run these tests on a machine with more memory')
 
     for item in items:
         deselect_test = False
@@ -441,9 +443,6 @@ def pytest_collection_modifyitems(items, config):
                 deselect_test = True
                 logger.info("SKIP: Deselecting test %s as test marked resource_intensive. To force execution of "
                       "this test re-run with the --force-resource-intensive-tests command line argument" % item.name)
-            if not sufficient_system_resources_resource_intensive:
-                deselect_test = True
-                logger.info("SKIP: Deselecting resource_intensive test %s due to insufficient system resources" % item.name)
 
         if item.get_marker("no_vnodes"):
             if config.getoption("--use-vnodes"):
