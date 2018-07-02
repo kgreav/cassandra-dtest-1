@@ -110,10 +110,6 @@ Run only resource intensive test suite.
 
     pytest --resource-intensive-tests-only
 
-Skip resource-intensive tests (default)
-
-    pytest --skip-resource-intensive-tests
-
 *NOTE: upgrade tests are currently not working, but these commands should at least select the correct tests*
 
 Run all upgrade tests as well as default test suite
@@ -124,13 +120,11 @@ Run only upgrade tests
 
     pytest --upgrade-tests-only
 
-Filters can be combined. For example, to run all tests which are `upgrade_test` AND `resource_intensive`:
+To run all tests which are both `upgrade_test` AND `resource_intensive`:
 
     pytest --force-resource-intensive-tests --upgrade-tests-only
-
-or to run ONLY `resource_intensive` upgrade tests:
-
-    pytest --upgrade-tests-only --resource-intensive-tests-only
+    or
+    pytest --resource-intensive-tests-only --upgrade-tests-only
 
 Installation Instructions
 -------------------------
