@@ -12,7 +12,6 @@ class DTestConfig:
         self.data_dir_count = -1
         self.force_execution_of_resource_intensive_tests = False
         self.resource_intensive_tests_only = False
-        self.skip_resource_intensive_tests = False
         self.cassandra_dir = None
         self.cassandra_version = None
         self.cassandra_version_from_build = None
@@ -29,9 +28,8 @@ class DTestConfig:
         self.use_off_heap_memtables = request.config.getoption("--use-off-heap-memtables")
         self.num_tokens = request.config.getoption("--num-tokens")
         self.data_dir_count = request.config.getoption("--data-dir-count-per-instance")
-        self.force_execution_of_resource_intensive_tests = request.config.getoption("--force-resource-intensive-tests")
+        self.resource_intensive_tests = request.config.getoption("--force-resource-intensive-tests")
         self.resource_intensive_tests_only = request.config.getoption("--resource-intensive-tests-only")
-        self.skip_resource_intensive_tests = request.config.getoption("--skip-resource-intensive-tests")
         if request.config.getoption("--cassandra-dir") is not None:
             self.cassandra_dir = os.path.expanduser(request.config.getoption("--cassandra-dir"))
         self.cassandra_version = request.config.getoption("--cassandra-version")
