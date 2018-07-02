@@ -11,12 +11,14 @@ class DTestConfig:
         self.num_tokens = -1
         self.data_dir_count = -1
         self.force_execution_of_resource_intensive_tests = False
+        self.resource_intensive_tests_only = False
         self.skip_resource_intensive_tests = False
         self.cassandra_dir = None
         self.cassandra_version = None
         self.cassandra_version_from_build = None
         self.delete_logs = False
         self.execute_upgrade_tests = False
+        self.upgrade_tests_only = False
         self.disable_active_log_watching = False
         self.keep_test_dir = False
         self.enable_jacoco_code_coverage = False
@@ -28,6 +30,7 @@ class DTestConfig:
         self.num_tokens = request.config.getoption("--num-tokens")
         self.data_dir_count = request.config.getoption("--data-dir-count-per-instance")
         self.force_execution_of_resource_intensive_tests = request.config.getoption("--force-resource-intensive-tests")
+        self.resource_intensive_tests_only = request.config.getoption("--resource-intensive-tests-only")
         self.skip_resource_intensive_tests = request.config.getoption("--skip-resource-intensive-tests")
         if request.config.getoption("--cassandra-dir") is not None:
             self.cassandra_dir = os.path.expanduser(request.config.getoption("--cassandra-dir"))
@@ -37,6 +40,7 @@ class DTestConfig:
 
         self.delete_logs = request.config.getoption("--delete-logs")
         self.execute_upgrade_tests = request.config.getoption("--execute-upgrade-tests")
+        self.upgrade_tests_only = request.config.getoption("--upgrade-tests-only")
         self.disable_active_log_watching = request.config.getoption("--disable-active-log-watching")
         self.keep_test_dir = request.config.getoption("--keep-test-dir")
         self.enable_jacoco_code_coverage = request.config.getoption("--enable-jacoco-code-coverage")
