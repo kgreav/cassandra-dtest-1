@@ -55,8 +55,6 @@ def pytest_addoption(parser):
                      help="Forces the execution of tests marked as resource_intensive")
     parser.addoption("--resource-intensive-tests-only", action="store_true", default=False,
                      help="Executes only tests marked as resource_intensive")
-    parser.addoption("--skip-resource-intensive-tests", action="store_true", default=False,
-                     help="Skip all tests marked as resource_intensive")
     parser.addoption("--cassandra-dir", action="store", default=None,
                      help="The directory containing the built C* artifacts to run the tests against. "
                           "(e.g. the path to the root of a cloned C* git directory. Before executing dtests using "
