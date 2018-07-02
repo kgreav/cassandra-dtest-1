@@ -123,17 +123,8 @@ class RunDTests():
         if args.dtest_tests:
             for test in args.dtest_tests.split(","):
                 args_to_invoke_pytest.append("{test_name}".format(test_name=test))
-        original_raw_cmd_args = ", ".join(args_to_invoke_pytest)
 
-        logger.debug("args to call with: [%s]" % original_raw_cmd_args)
-
-        # We pass nose_argv as options to the python call to maintain
-        # compatibility with the nosetests command. Arguments passed in via the
-        # command line are treated one way, args passed in as
-        # nose.main(argv=...) are treated another. Compare with the options
-        # -xsv for an example.
-        logger.debug('subprocess.call-ing {cmd_list}'.format(cmd_list=args_to_invoke_pytest))
-
+        logger.debug("args to call with: [{}]".format(", ".join(args_to_invoke_pytest)))
         sp = subprocess.Popen(args_to_invoke_pytest, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=os.environ.copy())
 
         if args.dtest_print_tests_only:
@@ -146,7 +137,6 @@ class RunDTests():
 
             all_collected_test_modules = collect_test_modules(stdout)
             joined_test_modules = "\n".join(all_collected_test_modules)
-            #print("Collected %d Test Modules" % len(all_collected_test_modules))
             if args.dtest_print_tests_output:
                 collected_tests_output_file = open(args.dtest_print_tests_output, "w")
                 collected_tests_output_file.write(joined_test_modules)
@@ -253,6 +243,7 @@ def collect_test_modules(stdout):
     # parse the now valid xml
     logger.debug("\n".join(test_collect_xml_lines))
     test_collect_xml = BeautifulSoup("\n".join(test_collect_xml_lines), "lxml-xml")
+
     # find all Modules (followed by classes in those modules, and then finally functions)
     for pytest_module in test_collect_xml.findAll("Module"):
         for test_class_name in pytest_module.findAll("Class"):
