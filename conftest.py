@@ -433,56 +433,54 @@ def pytest_collection_modifyitems(items, config):
     selected_items = []
     deselected_items = []
 
-    sufficient_system_resources_resource_intensive = sufficient_system_resources_for_resource_intensive_tests()
-    logger.debug("has sufficient resources? %s" % sufficient_system_resources_resource_intensive)
+    if sufficient_system_resources_for_resource_intensive_tests():
+        print('Not enough memory to reliably run "resource_intensive" tests, you will likely encounter many failures! Run these tests on a machine with more memory. 32GB+ is recommended')
 
+    resource_intensive = config.getoption("--force-resource-intensive-tests")
+    upgrade = config.getoption("--execute-upgrade-tests")
+    resource_intensive_only = config.getoption("--resource-intensive-tests-only")
+    upgrade_only = config.getoption("--upgrade-tests-only")
+    vnodes = config.getoption("--use-vnodes")
     for item in items:
         deselect_test = False
-
         if item.get_marker("resource_intensive"):
-            if config.getoption("--force-resource-intensive-tests"):
-                pass
-            if config.getoption("--skip-resource-intensive-tests"):
+            if not resource_intensive and not resource_intensive_only:
                 deselect_test = True
-                logger.info("SKIP: Deselecting test %s as test marked resource_intensive. To force execution of "
-                      "this test re-run with the --force-resource-intensive-tests command line argument" % item.name)
-            if not sufficient_system_resources_resource_intensive:
-                deselect_test = True
-                logger.info("SKIP: Deselecting resource_intensive test %s due to insufficient system resources" % item.name)
+                print("SKIP: Deselecting test {} as test marked resource_intensive. To force execution of "
+                      "this test re-run with the --force-resource-intensive-tests command line argument".format(item.name))
+        elif resource_intensive_only:
+            deselect_test = True
+            print("SKIP: Deselecting test {} as it is not marked resource_intensive".format(item.name))
 
         if item.get_marker("no_vnodes"):
-            if config.getoption("--use-vnodes"):
+            if vnodes:
                 deselect_test = True
-                logger.info("SKIP: Deselecting test %s as the test requires vnodes to be disabled. To run this test, "
-                      "re-run without the --use-vnodes command line argument" % item.name)
+                print("SKIP: Deselecting test {} as the test requires vnodes to be disabled. To run this test, "
+                      "re-run without the --use-vnodes command line argument".format(item.name))
 
         if item.get_marker("vnodes"):
-            if not config.getoption("--use-vnodes"):
+            if not vnodes:
                 deselect_test = True
-                logger.info("SKIP: Deselecting test %s as the test requires vnodes to be enabled. To run this test, "
-                            "re-run with the --use-vnodes command line argument" % item.name)
-
-        if config.getoption("--resource-intensive-tests-only") and not item.get_marker("resource_intensive"):
-            deselect_test = True
-            logger.info("SKIP: Deselecting test {0} as it is not marked resource_intensive", item.name)
+                print("SKIP: Deselecting test {} as the test requires vnodes to be enabled. To run this test, "
+                            "re-run with the --use-vnodes command line argument".format(item.name))
 
         for test_item_class in inspect.getmembers(item.module, inspect.isclass):
             if not hasattr(test_item_class[1], "pytestmark"):
                 # no "marks" in the class, deselect if we're doing upgrade tests only
-                if config.getoption("--upgrade-tests-only"):
+                if upgrade_only:
                     deselect_test = True
                 continue
 
             for module_pytest_mark in test_item_class[1].pytestmark:
                 if module_pytest_mark.name == "upgrade_test":
                     # Deselect upgrade tests if we haven't specified them
-                    if not config.getoption("--execute-upgrade-tests") and not config.getoption("--upgrade-tests-only"):
+                    if not upgrade and not upgrade_only:
                         deselect_test = True
 
         if item.get_marker("upgrade_test"):
-            if not config.getoption("--execute-upgrade-tests"):
+            if not upgrade:
                 deselect_test = True
-        elif config.getoption("--upgrade-tests-only"):
+        elif upgrade_only:
             deselect_test = True
 
         # todo kjkj: deal with no_offheap_memtables mark
@@ -493,5 +491,6 @@ def pytest_collection_modifyitems(items, config):
             selected_items.append(item)
 
     config.hook.pytest_deselected(items=deselected_items)
+    print("Selected {} and deselected/skipped {} tests.".format(len(selected_items), len(deselected_items)))
     items[:] = selected_items
 
