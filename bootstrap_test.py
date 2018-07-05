@@ -10,8 +10,7 @@ import signal
 
 from cassandra import ConsistencyLevel
 from cassandra.concurrent import execute_concurrent_with_args
-from ccmlib.node import NodeError
-from ccmlib.node import TimeoutError
+from ccmlib.node import NodeError, TimeoutError, ToolError
 
 import pytest
 
@@ -21,7 +20,7 @@ from tools.assertions import (assert_almost_equal, assert_bootstrap_state, asser
 from tools.data import query_c1c2
 from tools.intervention import InterruptBootstrap, KillOnBootstrap
 from tools.misc import new_node
-from tools.misc import generate_ssl_stores, retry_till_success
+from tools.misc import generate_ssl_stores
 
 since = pytest.mark.since
 logger = logging.getLogger(__name__)
@@ -706,10 +705,17 @@ class TestBootstrap(Tester):
     @since('2.2')
     def test_bootstrap_binary_disabled(self):
         """
-        Test binary while bootstraping
+        Test binary while bootstrapping and streaming fails
+        @jira_ticket CASSANDRA-14526, CASSANDRA-14525
         """
+        config = {'authenticator': 'org.apache.cassandra.auth.PasswordAuthenticator',
+                  'authorizer': 'org.apache.cassandra.auth.CassandraAuthorizer',
+                  'role_manager': 'org.apache.cassandra.auth.CassandraRoleManager',
+                  'permissions_validity_in_ms': 0,
+                  'roles_validity_in_ms': 0}
+
         cluster = self.cluster
-        cluster.populate(2)
+        cluster.populate(1)
 
         node1 = cluster.nodes['node1']
         # set up byteman
@@ -717,26 +723,68 @@ class TestBootstrap(Tester):
         node1.import_config_files()
 
         cluster.start(wait_other_notice=True)
-        # kill stream to node3 in the middle of streaming to let it fail
+        # kill stream to node2 in the middle of streaming to let it fail
         if cluster.version() < '4.0':
             node1.byteman_submit([self.byteman_submit_path_pre_4_0])
         else:
             node1.byteman_submit([self.byteman_submit_path_4_0])
-        node1.stress(['write', 'n=1K', 'no-warmup', 'cl=TWO', '-schema', 'replication(factor=2)', '-rate', 'threads=50'])
+        node1.stress(['write', 'n=1K', 'no-warmup', 'cl=ONE', '-schema', 'replication(factor=3)', '-rate', 'threads=50', '-mode', 'native', 'cql3', 'user=cassandra', 'password=cassandra'])
         cluster.flush()
 
-        # start bootstrapping node3 and wait for streaming
-        node3 = new_node(cluster)
-        node3.start(wait_other_notice=True)
-        binary_enabled = False
+        # start bootstrapping node2 and wait for streaming
+        node2 = new_node(cluster)
+        node2.set_configuration_options(values=config)
+        node2.byteman_port = '8101' # set for when we add node3
+        node2.import_config_files()
+        node2.start(jvm_args=["-Dcassandra.ring_delay_ms=5000"], wait_other_notice=True)
         try:
-            node3.wait_for_binary_interface(timeout=60)
-            binary_enabled = True
+            node2.wait_for_binary_interface(timeout=60)
+            pytest.fail('Node should not have started binary protocol')
         except TimeoutError:
             pass
-        assert binary_enabled == False
 
-        node3.watch_log_for('Some data streaming failed')
+        node2.watch_log_for('Some data streaming failed')
+        try:
+            node2.nodetool('join')
+            pytest.fail('nodetool should have errored and failed to join ring')
+        except ToolError as t:
+            assert "Cannot join the ring until bootstrap completes" in t.stdout
+
+        node2.nodetool('bootstrap resume')
+        node2.wait_for_binary_interface()
+        assert_bootstrap_state(self, node2, 'COMPLETED', user='cassandra', password='cassandra')
+
+        # Test write survey behaviour
+        node3 = new_node(cluster)
+        node3.set_configuration_options(values=config)
+
+        # kill stream to node3 in the middle of streaming to let it fail
+        if cluster.version() < '4.0':
+            node1.byteman_submit([self.byteman_submit_path_pre_4_0])
+            node2.byteman_submit([self.byteman_submit_path_pre_4_0])
+        else:
+            node1.byteman_submit([self.byteman_submit_path_4_0])
+            node2.byteman_submit([self.byteman_submit_path_4_0])
+
+        node3.start(jvm_args=["-Dcassandra.write_survey=true", "-Dcassandra.ring_delay_ms=5000"], wait_other_notice=True)
+        try:
+            node3.wait_for_binary_interface(timeout=60)
+            pytest.fail('Node should not have started binary protocol')
+        except TimeoutError:
+            pass
+
+        self.assert_log_had_msg(node3, 'Some data streaming failed', timeout=30)
+        try:
+            node3.nodetool('join')
+            pytest.fail('nodetool should have errored and failed to join ring')
+        except ToolError as t:
+            assert "Cannot join the ring until bootstrap completes" in t.stdout
+
         node3.nodetool('bootstrap resume')
-        node3.wait_for_binary_interface()
-        assert_bootstrap_state(self, node3, 'COMPLETED')
+        self.assert_log_had_msg(node3, "Not starting client transports as write_survey mode and authentication is enabled", timeout=30)
+
+        # Should succeed in joining
+        node3.nodetool('join')
+        self.assert_log_had_msg(node3, "Leaving write survey mode and joining ring at operator request", timeout=30)
+        assert_bootstrap_state(self, node3, 'COMPLETED', user='cassandra', password='cassandra')
+        node3.wait_for_binary_interface(timeout=30)
