@@ -41,6 +41,7 @@ from _pytest.config import Parser
 import argparse
 
 from conftest import pytest_addoption
+from ccmlib.common import get_version_from_build
 
 logger = logging.getLogger(__name__)
 
@@ -85,14 +86,23 @@ class RunDTests():
 
         args = parser.parse_args()
 
-        if not args.dtest_print_tests_only and args.cassandra_dir is None:
-            if args.cassandra_version is None:
+        if not args.dtest_print_tests_only:
+            if args.cassandra_dir is None and args.cassandra_version is None:
                 raise Exception("Required dtest arguments were missing! You must provide either --cassandra-dir "
                                 "or --cassandra-version. Refer to the documentation or invoke the help with --help.")
+
+            # Either cassandra_version or cassandra_dir is defined, so figure out the version
+            CASSANDRA_VERSION = args.cassandra_version or get_version_from_build(args.cassandra_dir)
+
+            if args.use_off_heap_memtables and ("3.0" <= CASSANDRA_VERSION < "3.4"):
+                raise Exception("The selected Cassandra version %s doesn't support the provided option "
+                                "--use-off-heap-memtables, see https://issues.apache.org/jira/browse/CASSANDRA-9472 "
+                                "for details" % CASSANDRA_VERSION)
 
         if args.dtest_enable_debug_logging:
             logging.root.setLevel(logging.DEBUG)
             logger.setLevel(logging.DEBUG)
+
 
         # Get dictionaries corresponding to each point in the configuration matrix
         # we want to run, then generate a config object for each of them.
@@ -211,7 +221,7 @@ def collect_test_modules(stdout):
 
                 test_collect_xml_lines.append("  </Module>")
                 is_first_class = True
-                has_closed_class= False
+                has_closed_class = False
                 section_has_instance = False
                 section_has_class = False
                 is_first_module = False
